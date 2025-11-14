@@ -48,6 +48,7 @@ func fetchStdErr(t *testing.T) string {
 	return output
 }
 func TestCommands(t *testing.T) {
+
 	t.Run("should print help command", func(t *testing.T) {
 		os.Args = []string{
 			"", // for first input
@@ -80,6 +81,44 @@ func TestCommands(t *testing.T) {
 
 		if !strings.ContainsAny(output, "invalid sub command 'invalid-sub' use 'help' for list of possible commands") {
 			t.Fatalf("invalid sub command message was not printed")
+		}
+	})
+
+}
+func TestInitCommand(t *testing.T) {
+	t.Run("should initialize in tmp dir", func(t *testing.T) {
+		t.Setenv("run_env", "test")
+		initialize()
+		_, err := os.Stat("tmp/")
+		if err != nil {
+			t.Fatalf("tmp dir does not exist: %s", err.Error())
+		}
+		_, err = os.Stat("tmp/.git")
+		if err != nil {
+			t.Fatalf(".git dir does not exist: %s", err.Error())
+		}
+
+		_, err = os.Stat("tmp/.git/objects")
+		if err != nil {
+			t.Fatalf(".git/objects dir does not exist: %s", err.Error())
+		}
+
+		_, err = os.Stat("tmp/.git/ref")
+		if err != nil {
+			t.Fatalf(".git/refs dir does not exist: %s", err.Error())
+		}
+
+		t.Cleanup(func() {
+			if err := os.RemoveAll("tmp/"); err != nil {
+				t.Fatalf("failed to remove tmp dir at end: %s", err.Error())
+			}
+		})
+	})
+	t.Run("should return already exist err", func(t *testing.T) {
+		initialize()
+		err := fetchStdErr(t)
+		if !strings.ContainsAny(err, "the .git dir already exists") {
+			t.Fatal("the .git dir already exists message was not printed")
 		}
 	})
 }

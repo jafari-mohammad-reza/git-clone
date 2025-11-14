@@ -16,12 +16,15 @@ func main() {
 	switch strings.ToLower(command) {
 	case "help":
 		help(args)
+	case "init":
+		initialize()
 	case "read-tree":
 		if len(args) > 2 {
 			inp := args[2]
 			if inp == "" {
 				respErr("invalid input file use read-tree --list for list of possible hashes to read.")
 			}
+
 		} else {
 			respErr("specify which file to read use 'help read-tree' for more info")
 		}
@@ -30,6 +33,36 @@ func main() {
 		respErrF("invalid command '%s' use help for list of commands", command)
 	}
 
+}
+
+func initialize() {
+	initDir := ".git"
+	run_env := os.Getenv("run_env")
+	if run_env == "test" {
+
+		initDir = "tmp/.git"
+	}
+	_, err := os.Stat(initDir)
+	if err != nil {
+		if err := os.MkdirAll(initDir, 0755); err != nil {
+			respErrF("failed to create .git dir: %s", err.Error())
+		}
+		if err := os.MkdirAll(fmt.Sprintf("%s/objects", initDir), 0755); err != nil {
+			respErrF("failed to create %s/objects dir: %s", initDir, err.Error())
+		}
+		if err := os.MkdirAll(fmt.Sprintf("%s/ref", initDir), 0755); err != nil {
+			respErrF("failed to create %s/refs dir: %s", initDir, err.Error())
+		}
+		if err := os.MkdirAll(fmt.Sprintf("%s/logs", initDir), 0755); err != nil {
+			respErrF("failed to create %s/logs dir: %s", initDir, err.Error())
+		}
+		if err := os.WriteFile(fmt.Sprintf("%s/HEAD", initDir), []byte("ref: refs/heads/main\n"), 0755); err != nil {
+			respErrF("failed to write %s/HEAD file: %s", initDir, err.Error())
+		}
+	} else {
+		// we can either recreate .git dir or give error that it exists
+		respErr("the .git dir already exists")
+	}
 }
 
 func help(args []string) {
@@ -62,13 +95,18 @@ func respErrF(format string, args ...any) {
 }
 func respErr(msgs ...string) {
 	m := new(strings.Builder)
-	for i, msg := range msgs {
-		if i == 0 {
-			fmt.Fprintf(m, "%s%s%s ", White, msg, Reset)
-		} else {
-			fmt.Fprintf(m, "%s%s%s ", Red, msg, Reset)
+	if len(msgs) > 1 {
+		for i, msg := range msgs {
+			if i == 0 {
+				fmt.Fprintf(m, "%s%s%s ", White, msg, Reset)
+			} else {
+				fmt.Fprintf(m, "%s%s%s ", Red, msg, Reset)
+			}
 		}
+	} else {
+		fmt.Fprintf(m, "%s%s%s ", Red, msgs[0], Reset)
 	}
+
 	m.WriteString("\n")
 	os.Stderr.WriteString(m.String())
 }
