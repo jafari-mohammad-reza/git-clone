@@ -59,15 +59,15 @@ func TestCommands(t *testing.T) {
 			t.Fatalf("help command was not printed")
 		}
 	})
-	t.Run("should print help command for read-tree", func(t *testing.T) {
+	t.Run("should print help command for cat-file", func(t *testing.T) {
 		os.Args = []string{
 			"", // for first input
 			"help",
-			"read-tree",
+			"cat-file",
 		}
 		output := fetchStdOut(t)
 
-		if !strings.ContainsAny(output, "read-tree <hash>: reads the changes of a hash and prints the changes content") {
+		if !strings.ContainsAny(output, "cat-file <hash>: reads the changes of a hash and prints the changes content") {
 			t.Fatalf("read tree help content is not printed")
 		}
 	})
@@ -106,6 +106,14 @@ func TestInitCommand(t *testing.T) {
 		_, err = os.Stat("tmp/.git/ref")
 		if err != nil {
 			t.Fatalf(".git/refs dir does not exist: %s", err.Error())
+		}
+		head, err := os.ReadFile("tmp/.git/HEAD")
+		if err != nil {
+			t.Fatalf("HEAD file does not exist")
+		}
+
+		if !strings.ContainsAny(string(head), "ref: refs/heads/main") {
+			t.Fatal("the ref content was wrong")
 		}
 
 		t.Cleanup(func() {

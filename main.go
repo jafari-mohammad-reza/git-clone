@@ -18,21 +18,54 @@ func main() {
 		help(args)
 	case "init":
 		initialize()
-	case "read-tree":
-		if len(args) > 2 {
-			inp := args[2]
-			if inp == "" {
-				respErr("invalid input file use read-tree --list for list of possible hashes to read.")
-			}
-
-		} else {
-			respErr("specify which file to read use 'help read-tree' for more info")
-		}
+	case "cat-file":
+		catFile(args)
 
 	default:
 		respErrF("invalid command '%s' use help for list of commands", command)
 	}
 
+}
+
+func catFile(args []string) {
+	if len(args) > 2 {
+		inp := args[2]
+		if inp == "" {
+			respErr("invalid input file use cat-file --list for list of possible hashes to read.")
+		}
+		objDir := fmt.Sprintf(".git/objects/%s", inp[:2])
+		stat, err := os.Stat(objDir)
+		if err != nil {
+			respErrF("the %s reference dir does not exits in .git/objects at %s", inp, objDir)
+		}
+		if !stat.IsDir() {
+			respErr("the reference is not a dir")
+		}
+		entries, err := os.ReadDir(objDir)
+		if err != nil {
+			respErrF("failed to read %s entries: %s", objDir, err.Error())
+		}
+		found := ""
+		for _, entry := range entries {
+			entry.Name()
+			if strings.HasPrefix(entry.Name(), inp[2:]) {
+				found = entry.Name()
+				break
+			}
+		}
+		if found == "" {
+			respErrF("failed to find any reference with prefix of : %s", inp[2:])
+		}
+		rp := fmt.Sprintf(".git/objects/%s/%s", inp[:2], found)
+
+		_, err = os.Stat(rp)
+		if err != nil {
+			respErrF("the %s reference does not exits in .git/objects at %s", inp, rp)
+		}
+		
+	} else {
+		respErr("specify which file to read use 'help cat-file' for more info")
+	}
 }
 
 func initialize() {
@@ -69,13 +102,13 @@ func help(args []string) {
 	if len(args) > 2 {
 		subCmd := args[2]
 		switch subCmd {
-		case "read-tree":
-			resp("read-tree <hash>:", "reads the changes of a hash and prints the changes content")
+		case "cat-file":
+			resp("cat-file <hash>:", "reads the changes of a hash and prints the changes content")
 		default:
 			respErrF("invalid sub command '%s' use 'help' for list of possible commands", subCmd)
 		}
 	} else {
-		resp("list of possible commands:", "\n\t- help", "\n\t- read-tree")
+		resp("list of possible commands:", "\n\t- help", "\n\t- cat-file")
 	}
 }
 
