@@ -225,3 +225,29 @@ func TestLogCommand(t *testing.T) {
 	t.Run("should ignore blob file", func(t *testing.T) {})
 
 }
+
+func TestHashObject(t *testing.T) {
+	t.Run("should hash file successfully adn read it back to normal", func(t *testing.T) {
+		t.Setenv("run_env", "test")
+		initialize()
+		args := []string{"", "", "main.go"}
+		hash := hashObject(args)
+		if hash == "" {
+			t.Fatal("unexpected hash: empty hash string")
+		}
+
+		hashPath := fmt.Sprintf("tmp/.git/objects/%s/%s", hash[:2], hash[2:])
+		_, err := os.ReadFile(hashPath)
+		if err != nil {
+			t.Fatalf("failed to read %s: %s", hashPath, err.Error())
+		}
+
+		catFile([]string{"", "", hash})
+
+		t.Cleanup(func() {
+			if err := os.RemoveAll("tmp/"); err != nil {
+				t.Fatalf("failed to remove tmp for cleanup: %s", err.Error())
+			}
+		})
+	})
+}
