@@ -19,44 +19,74 @@ import (
 func main() {
 	args := os.Args
 	if len(args) < 1 {
-		respErr("please specify you command.use help for list of commands")
+		fmt.Println("please specify you command.use help for list of commands")
 		return
 	}
+	runEnv := os.Getenv("run_env")
 	command := args[1]
 	switch strings.ToLower(command) {
 	case "help":
-		help(args)
+		subCmd := ""
+		if len(args) >= 3 {
+			subCmd = args[2]
+		}
+		resp, err := help(subCmd)
+		if err != nil {
+			println(err.Error())
+			return
+		}
+		println(resp)
 	case "init":
-		initialize()
+		if err := initialize(runEnv); err != nil {
+			println(err.Error())
+			return
+		}
 	case "cat-file":
-		catFile(args)
+		resp, err := catFile(args)
+		if err != nil {
+			println(err.Error())
+			return
+		}
+		println(resp)
 	case "hash-object":
-		hashObject(args)
+		if len(args) < 3 {
+			fmt.Println("give the file you want to hash")
+			return
+		}
+		file := args[2]
+		hash, err := hashObject(file)
+		if err != nil {
+			println(err.Error())
+			return
+		}
+		println(hash)
 	case "log":
-		log()
+		logs, err := log()
+		if err != nil {
+			println(err)
+			return
+		}
+		for _, log := range logs {
+			println(log)
+		}
 	default:
-		respErrF("invalid command '%s' use help for list of commands", command)
+		fmt.Printf("invalid command '%s' use help for list of commands\n", command)
 	}
 
 }
 
-func hashObject(args []string) string {
-	if len(args) < 3 {
-		respErr("give the file you want to hash")
-		return ""
-	}
-	file := args[2]
+func hashObject(file string) (string, error) {
 	raw, err := os.ReadFile(file)
 	if err != nil {
-		respErrF("failed to read %s: %s", file, err.Error())
-		return ""
+		return "", fmt.Errorf("failed to read %s: %s", file, err.Error())
+
 	}
 	header := fmt.Sprintf("blob %d\x00", len(raw))
 	full := append([]byte(header), raw...)
 	hasher := sha1.New()
 	if _, err = hasher.Write(full); err != nil {
-		respErrF("failed to hash header %s: %s", file, err.Error())
-		return ""
+		return "", fmt.Errorf("failed to hash header %s: %s", file, err.Error())
+
 	}
 	hash := fmt.Sprintf("%x", hasher.Sum(nil))
 
@@ -66,27 +96,27 @@ func hashObject(args []string) string {
 		targetDir = fmt.Sprintf("tmp/.git/objects/%s", hash[:2])
 	}
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		respErrF("failed to create %s dir: %s", targetDir, err.Error())
-		return ""
+		return "", fmt.Errorf("failed to create %s dir: %s", targetDir, err.Error())
+
 	}
 	out, err := os.OpenFile(fmt.Sprintf("%s/%s", targetDir, hash[2:]), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0755)
 	if err != nil {
-		respErrF("failed to create %s file: %s", fmt.Sprintf("%s/%s", targetDir, hash[2:]), err.Error())
-		return ""
+		return "", fmt.Errorf("failed to create %s file: %s", fmt.Sprintf("%s/%s", targetDir, hash[2:]), err.Error())
+
 	}
 	defer out.Close()
 	writer := zlib.NewWriter(out)
 	if _, err := writer.Write(full); err != nil {
-		respErrF("failed to write compressed data: %s", err.Error())
-		return ""
+		return "", fmt.Errorf("failed to write compressed data: %s", err.Error())
+
 	}
 	defer writer.Close()
-	resp("hash file:", hash)
-	return hash
+
+	return hash, nil
 }
 
 // NOTE: only commit and tree messages are handled
-func log() {
+func log() ([]string, error) {
 	run_env := os.Getenv("run_env")
 
 	searchDir := ".git/objects"
@@ -101,18 +131,18 @@ func log() {
 
 	stat, err := os.Stat(searchDir)
 	if err != nil {
-		respErrF("log err: the %s dir does not exist", searchDir)
-		return
+		return nil, fmt.Errorf("log err: the %s dir does not exist", searchDir)
+
 	}
 	if !stat.IsDir() {
-		respErrF("log err: the %s is not a dir", searchDir)
-		return
+		return nil, fmt.Errorf("log err: the %s is not a dir", searchDir)
+
 	}
 
 	entries, err := os.ReadDir(searchDir)
 	if err != nil {
-		respErrF("log err: failed to read %s entries", searchDir)
-		return
+		return nil, fmt.Errorf("log err: failed to read %s entries", searchDir)
+
 	}
 
 	refFiles := make([]string, 0)
@@ -129,8 +159,8 @@ func log() {
 		subDir := filepath.Join(searchDir, entry.Name())
 		subEntries, err := os.ReadDir(subDir)
 		if err != nil {
-			respErrF("log err: failed to read %s entries: %s", entry.Name(), err.Error())
-			return
+			return nil, fmt.Errorf("log err: failed to read %s entries: %s", entry.Name(), err.Error())
+
 		}
 
 		for _, subEntry := range subEntries {
@@ -146,7 +176,7 @@ func log() {
 			refFiles = append(refFiles, sha)
 		}
 	}
-
+	responses := make([]string, 0, len(refFiles))
 	for _, ref := range refFiles {
 		path := filepath.Join(searchDir, ref[:2], ref[2:])
 
@@ -157,9 +187,10 @@ func log() {
 			continue
 		}
 
-		respF("%s %s\nAuthor: %s %s\nDate: %s\n\n%s\n\n",
-			objType, ref, authorName, authorEmail, timestamp, msg)
+		responses = append(responses, fmt.Sprintf("%s %s\nAuthor: %s %s\nDate: %s\n\n%s\n\n",
+			objType, ref, authorName, authorEmail, timestamp, msg))
 	}
+	return responses, nil
 }
 
 func readCommitRef(refPath string) (string, string, string, string, string, error) {
@@ -234,7 +265,7 @@ func readCommitRef(refPath string) (string, string, string, string, string, erro
 	return objType, authorName, authorEmail, t, msg, nil
 }
 
-func catFile(args []string) {
+func catFile(args []string) (string, error) {
 	run_env := os.Getenv("run_env")
 
 	searchDir := ".git/objects"
@@ -245,24 +276,20 @@ func catFile(args []string) {
 	if len(args) > 2 {
 		inp := args[2]
 		if inp == "" {
-			respErr("cat-file err: invalid input file use cat-file --list for list of possible hashes to read.")
-			return
+			return "", fmt.Errorf("cat-file err: invalid input file use cat-file --list for list of possible hashes to read.")
 		}
 		objDir := fmt.Sprintf("%s/%s", searchDir, inp[:2])
 
 		stat, err := os.Stat(objDir)
 		if err != nil {
-			respErrF("cat-file err: the %s reference dir does not exits in %s at %s", inp, searchDir, objDir)
-			return
+			return "", fmt.Errorf("cat-file err: the %s reference dir does not exits in %s at %s", inp, searchDir, objDir)
 		}
 		if !stat.IsDir() {
-			respErr("cat-file err: the reference is not a dir")
-			return
+			return "", fmt.Errorf("cat-file err: the reference is not a dir")
 		}
 		entries, err := os.ReadDir(objDir)
 		if err != nil {
-			respErrF("cat-file err: failed to read %s entries: %s", objDir, err.Error())
-			return
+			return "", fmt.Errorf("cat-file err: failed to read %s entries: %s", objDir, err.Error())
 		}
 		found := ""
 		for _, entry := range entries {
@@ -273,25 +300,25 @@ func catFile(args []string) {
 			}
 		}
 		if found == "" {
-			respErrF("cat-file err: failed to find any reference with prefix of : %s", inp[2:])
-			return
+			return "", fmt.Errorf("cat-file err: failed to find any reference with prefix of : %s", inp[2:])
+
 		}
 		rp := fmt.Sprintf("%s/%s/%s", searchDir, inp[:2], found)
 
 		_, err = os.Stat(rp)
 		if err != nil {
-			respErrF("cat-file err: the %s reference does not exits in %s at %s", inp, searchDir, rp)
-			return
+			return "", fmt.Errorf("cat-file err: the %s reference does not exits in %s at %s", inp, searchDir, rp)
+
 		}
 		refFile, err := os.OpenFile(rp, os.O_RDONLY, 0755)
 		if err != nil {
-			respErrF("cat-file err: failed to open %s file: %s", rp, err.Error())
-			return
+			return "", fmt.Errorf("cat-file err: failed to open %s file: %s", rp, err.Error())
+
 		}
 		reader, err := zlib.NewReader(refFile)
 		if err != nil {
-			respErrF("cat-file err: failed to create reader for %s file in zlib: %s", rp, err.Error())
-			return
+			return "", fmt.Errorf("cat-file err: failed to create reader for %s file in zlib: %s", rp, err.Error())
+
 		}
 		defer reader.Close()
 		buf := bufio.NewReader(reader)
@@ -306,57 +333,70 @@ func catFile(args []string) {
 		payload := make([]byte, objSize)
 		_, err = io.ReadFull(buf, payload)
 		if err != nil {
-			respErrF("cat-file err: failed to read payload of %s object type: %s", err.Error(), objType)
-			return
+			return "", fmt.Errorf("cat-file err: failed to read payload of %s object type: %s", err.Error(), objType)
+
 		}
-		resp(fmt.Sprintf("%s payload is:\n", rp), string(payload))
-		return
+		return fmt.Sprintf("%s payload is:\n%s%s%s", rp, Blue, string(payload), Reset), nil // TODO: make the outcome look better
+
 	} else {
-		respErr("cat-file err: specify which file to read use 'help cat-file' for more info")
-		return
+		return "", fmt.Errorf("cat-file err: specify which file to read use 'help cat-file' for more info")
 	}
 }
 
-func initialize() {
+func initialize(runEnv string) error {
 	initDir := ".git"
-	run_env := os.Getenv("run_env")
-	if run_env == "test" {
+	if runEnv == "test" {
 		initDir = "tmp/.git"
 	}
 	_, err := os.Stat(initDir)
 	if err != nil {
 		if err := os.MkdirAll(initDir, 0755); err != nil {
-			respErrF("failed to create .git dir: %s", err.Error())
+			return fmt.Errorf("failed to create .git dir: %s", err.Error())
 		}
 		if err := os.MkdirAll(fmt.Sprintf("%s/objects", initDir), 0755); err != nil {
-			respErrF("failed to create %s/objects dir: %s", initDir, err.Error())
+			return fmt.Errorf("failed to create %s/objects dir: %s", initDir, err.Error())
 		}
 		if err := os.MkdirAll(fmt.Sprintf("%s/refs", initDir), 0755); err != nil {
-			respErrF("failed to create %s/refs dir: %s", initDir, err.Error())
+			return fmt.Errorf("failed to create %s/refs dir: %s", initDir, err.Error())
 		}
 		if err := os.MkdirAll(fmt.Sprintf("%s/logs", initDir), 0755); err != nil {
-			respErrF("failed to create %s/logs dir: %s", initDir, err.Error())
+			return fmt.Errorf("failed to create %s/logs dir: %s", initDir, err.Error())
 		}
 		if err := os.WriteFile(fmt.Sprintf("%s/HEAD", initDir), []byte("ref: refs/heads/main\n"), 0755); err != nil {
-			respErrF("failed to write %s/HEAD file: %s", initDir, err.Error())
+			return fmt.Errorf("failed to write %s/HEAD file: %s", initDir, err.Error())
 		}
 	} else {
-		// we can either recreate .git dir or give error that it exists
-		respErr("the .git dir already exists")
+		println("the .git dir already exists")
 	}
+	return nil
 }
 
-func help(args []string) {
-	if len(args) > 2 {
-		subCmd := args[2]
+func help(subCmd string) (string, error) {
+	if subCmd != "" {
 		switch subCmd {
+		case "init":
+			return `
+				init: initialized .git directory along:
+					-  .git/objects => for storing hash files
+					-  .git/refs => for storing refs(branches) (wont implement this one in clone)
+					- .git/HEAD => the file for storing the head commit of current branch
+			`, nil
+		case "hash-object":
+			return "hash-object <file>: creates a hash of file using its size and blob content then store that hash in .git/objects/{fist two char of hash}/{from second character to end of hash} and then write the compressed content by suing zlib to the hash file", nil
 		case "cat-file":
-			resp("cat-file <hash>:", "reads the changes of a hash and prints the changes content")
+			return "cat-file <hash>: reads the changes of a hash and prints the changes content", nil
+		case "log":
+			return "log: prints commits and tree hashes. and shows its author, date of commit and the commit message", nil
 		default:
-			respErrF("invalid sub command '%s' use 'help' for list of possible commands", subCmd)
+			return "", fmt.Errorf("invalid sub command '%s' use 'help' for list of possible commands", subCmd)
 		}
 	} else {
-		resp("list of possible commands:", "\n\t- help", "\n\t- cat-file")
+		return `
+			init => initialize required files and directories. 
+			cat-file => read a ref compressed hash file into actual content.
+			hash-object => read a ref compressed hash file into actual content.
+			log => shows list commits.
+		`, nil
 	}
 }
 
@@ -366,47 +406,3 @@ const (
 	Red   = "\033[31m"
 	Reset = "\033[0m"
 )
-
-// we use our own print methods for later tests to capture stdout and stderr
-func respErrF(format string, args ...any) {
-	m := new(strings.Builder)
-	fmt.Fprintf(m, format, args...) // apply formatting
-	m.WriteString("\n")
-	os.Stderr.WriteString(m.String())
-}
-func respErr(msgs ...string) {
-	m := new(strings.Builder)
-	if len(msgs) > 1 {
-		for i, msg := range msgs {
-			if i == 0 {
-				fmt.Fprintf(m, "%s%s%s ", White, msg, Reset)
-			} else {
-				fmt.Fprintf(m, "%s%s%s ", Red, msg, Reset)
-			}
-		}
-	} else {
-		fmt.Fprintf(m, "%s%s%s ", Red, msgs[0], Reset)
-	}
-
-	m.WriteString("\n")
-	os.Stderr.WriteString(m.String())
-}
-
-func respF(format string, args ...any) {
-	m := new(strings.Builder)
-	fmt.Fprintf(m, format, args...) // formatting
-	m.WriteString("\n")
-	os.Stdout.WriteString(m.String())
-}
-func resp(msgs ...string) {
-	m := new(strings.Builder)
-	for i, msg := range msgs {
-		if i == 0 {
-			fmt.Fprintf(m, "%s%s%s", White, msg, Reset)
-		} else {
-			fmt.Fprintf(m, "%s%s%s", Blue, msg, Reset)
-		}
-	}
-	m.WriteString("\n")
-	os.Stdout.WriteString(m.String())
-}
