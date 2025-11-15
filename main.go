@@ -36,6 +36,8 @@ func main() {
 	}
 
 }
+
+// NOTE: only commit and tree messages are handled
 func log() {
 	run_env := os.Getenv("run_env")
 
@@ -136,8 +138,11 @@ func readCommitRef(refPath string) (string, string, string, string, string, erro
 
 	parts := bytes.SplitN(header, []byte(" "), 2)
 	objType := string(parts[0])
-
-	if objType != "commit" {
+	allowedTypes := []string{
+		"commit",
+		"tree",
+	}
+	if !slices.Contains(allowedTypes, objType) {
 		return "", "", "", "", "", errors.New("none commit ref")
 	}
 
@@ -150,7 +155,6 @@ func readCommitRef(refPath string) (string, string, string, string, string, erro
 	}
 
 	payloadStr := string(payload)
-
 	lines := strings.Split(payloadStr, "\n")
 
 	var authorName, authorEmail, timestamp string
@@ -179,7 +183,6 @@ func readCommitRef(refPath string) (string, string, string, string, string, erro
 	}
 
 	t := time.Unix(int64(tsInt), 0).Local().String()
-
 	return objType, authorName, authorEmail, t, msg, nil
 }
 
