@@ -217,3 +217,11 @@ func TestCatFile(t *testing.T) {
 		})
 	})
 }
+
+func TestLogCommand(t *testing.T) {
+	// TODO‌: need implementing write hash for testing manually
+	t.Run("should return list of commits/tree", func(t *testing.T) {})
+	t.Run("should fail to read commit file", func(t *testing.T) {})
+	t.Run("should ignore blob file", func(t *testing.T) {})
+
+}
