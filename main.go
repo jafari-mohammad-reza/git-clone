@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/zlib"
+	"crypto/sha1"
 	"errors"
 	"fmt"
 	"io"
@@ -29,12 +30,59 @@ func main() {
 		initialize()
 	case "cat-file":
 		catFile(args)
+	case "hash-object":
+		hashObject(args)
 	case "log":
 		log()
 	default:
 		respErrF("invalid command '%s' use help for list of commands", command)
 	}
 
+}
+
+func hashObject(args []string) string {
+	if len(args) < 3 {
+		respErr("give the file you want to hash")
+		return ""
+	}
+	file := args[2]
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		respErrF("failed to read %s: %s", file, err.Error())
+		return ""
+	}
+	header := fmt.Sprintf("blob %d\x00", len(raw))
+	full := append([]byte(header), raw...)
+	hasher := sha1.New()
+	if _, err = hasher.Write(full); err != nil {
+		respErrF("failed to hash header %s: %s", file, err.Error())
+		return ""
+	}
+	hash := fmt.Sprintf("%x", hasher.Sum(nil))
+
+	targetDir := fmt.Sprintf(".git/objects/%s", hash[:2])
+	run_env := os.Getenv("run_env")
+	if run_env == "test" {
+		targetDir = fmt.Sprintf("tmp/.git/objects/%s", hash[:2])
+	}
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		respErrF("failed to create %s dir: %s", targetDir, err.Error())
+		return ""
+	}
+	out, err := os.OpenFile(fmt.Sprintf("%s/%s", targetDir, hash[2:]), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0755)
+	if err != nil {
+		respErrF("failed to create %s file: %s", fmt.Sprintf("%s/%s", targetDir, hash[2:]), err.Error())
+		return ""
+	}
+	defer out.Close()
+	writer := zlib.NewWriter(out)
+	if _, err := writer.Write(full); err != nil {
+		respErrF("failed to write compressed data: %s", err.Error())
+		return ""
+	}
+	defer writer.Close()
+	resp("hash file:", hash)
+	return hash
 }
 
 // NOTE: only commit and tree messages are handled
