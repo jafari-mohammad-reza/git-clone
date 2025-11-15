@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -103,7 +104,7 @@ func TestInitCommand(t *testing.T) {
 			t.Fatalf(".git/objects dir does not exist: %s", err.Error())
 		}
 
-		_, err = os.Stat("tmp/.git/ref")
+		_, err = os.Stat("tmp/.git/refs")
 		if err != nil {
 			t.Fatalf(".git/refs dir does not exist: %s", err.Error())
 		}
@@ -128,5 +129,90 @@ func TestInitCommand(t *testing.T) {
 		if !strings.ContainsAny(err, "the .git dir already exists") {
 			t.Fatal("the .git dir already exists message was not printed")
 		}
+	})
+}
+
+func TestCatFile(t *testing.T) {
+	t.Run("should find the file with the prfix", func(t *testing.T) {
+		t.Setenv("run_env", "test")
+		initialize()
+		keyname := "abcdefg"
+		if err := os.MkdirAll(fmt.Sprintf("tmp/.git/objects/%s", keyname[:2]), 0755); err != nil {
+			t.Fatalf("failed to create the dir with given prefix: %s", err.Error())
+		}
+		if err := os.WriteFile(fmt.Sprintf("tmp/.git/objects/%s/%s", keyname[:2], keyname[2:]), []byte("test"), 0755); err != nil {
+			t.Fatalf("failed to write file with keyname after second char: %s", err.Error())
+		}
+		catFile([]string{
+			"",
+			"",
+			keyname,
+		})
+		err := fetchStdErr(t)
+
+		if strings.HasPrefix(err, "cat-file err:") {
+			t.Fatal("stderr is not empty")
+		}
+		t.Cleanup(func() {
+			if err := os.RemoveAll("tmp/"); err != nil {
+				t.Fatalf("failed to cleanup tmp dir: %s", err.Error())
+			}
+		})
+	})
+	t.Run("should throw error that inpt is not given", func(t *testing.T) {
+		catFile([]string{
+			"",
+			"",
+		})
+		err := fetchStdErr(t)
+		if !strings.ContainsAny(err, "cat-file err: specify which file to read use 'help cat-file' for more info") {
+			t.Fatalf("expected to get 'cat-file err: specify which file to read use 'help cat-file' for more info' but got %s", err)
+		}
+
+	})
+	t.Run("should throw error that objects dir is not found", func(t *testing.T) {
+		t.Setenv("run_env", "test")
+		initialize()
+		keyname := "abcdefg"
+
+		catFile([]string{
+			"",
+			"",
+			keyname,
+		})
+		err := fetchStdErr(t)
+		if !strings.ContainsAny(err, "cat-file err: the abcdefg reference dir does not exits in tmp/.git/objects at tmp/.git/objects/ab") {
+			t.Fatal("wrong error message")
+		}
+		t.Cleanup(func() {
+			if err := os.RemoveAll("tmp/"); err != nil {
+				t.Fatalf("failed to cleanup tmp dir: %s", err.Error())
+			}
+		})
+	})
+
+	t.Run("should throw error that the given file is not found from second char to last", func(t *testing.T) {
+		t.Setenv("run_env", "test")
+		initialize()
+		keyname := "abcdefg"
+		if err := os.MkdirAll(fmt.Sprintf("tmp/.git/objects/%s", keyname[:2]), 0755); err != nil {
+			t.Fatalf("failed to create the dir with given prefix: %s", err.Error())
+		}
+
+		catFile([]string{
+			"",
+			"",
+			keyname,
+		})
+		err := fetchStdErr(t)
+
+		if !strings.ContainsAny(err, "cat-file err: failed to find any reference with prefix of : cdefg") {
+			t.Fatal("stderr is not empty")
+		}
+		t.Cleanup(func() {
+			if err := os.RemoveAll("tmp/"); err != nil {
+				t.Fatalf("failed to cleanup tmp dir: %s", err.Error())
+			}
+		})
 	})
 }

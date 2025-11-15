@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/zlib"
 	"fmt"
 	"os"
 	"strings"
@@ -28,22 +29,34 @@ func main() {
 }
 
 func catFile(args []string) {
+	run_env := os.Getenv("run_env")
+
+	searchDir := ".git/objects"
+	if run_env == "test" {
+		searchDir = "tmp/.git/objects"
+	}
+
 	if len(args) > 2 {
 		inp := args[2]
 		if inp == "" {
-			respErr("invalid input file use cat-file --list for list of possible hashes to read.")
+			respErr("cat-file err: invalid input file use cat-file --list for list of possible hashes to read.")
+			return
 		}
-		objDir := fmt.Sprintf(".git/objects/%s", inp[:2])
+		objDir := fmt.Sprintf("%s/%s", searchDir, inp[:2])
+
 		stat, err := os.Stat(objDir)
 		if err != nil {
-			respErrF("the %s reference dir does not exits in .git/objects at %s", inp, objDir)
+			respErrF("cat-file err: the %s reference dir does not exits in %s at %s", inp, searchDir, objDir)
+			return
 		}
 		if !stat.IsDir() {
-			respErr("the reference is not a dir")
+			respErr("cat-file err: the reference is not a dir")
+			return
 		}
 		entries, err := os.ReadDir(objDir)
 		if err != nil {
-			respErrF("failed to read %s entries: %s", objDir, err.Error())
+			respErrF("cat-file err: failed to read %s entries: %s", objDir, err.Error())
+			return
 		}
 		found := ""
 		for _, entry := range entries {
@@ -54,17 +67,30 @@ func catFile(args []string) {
 			}
 		}
 		if found == "" {
-			respErrF("failed to find any reference with prefix of : %s", inp[2:])
+			respErrF("cat-file err: failed to find any reference with prefix of : %s", inp[2:])
+			return
 		}
-		rp := fmt.Sprintf(".git/objects/%s/%s", inp[:2], found)
+		rp := fmt.Sprintf("%s/%s/%s", searchDir, inp[:2], found)
 
 		_, err = os.Stat(rp)
 		if err != nil {
-			respErrF("the %s reference does not exits in .git/objects at %s", inp, rp)
+			respErrF("cat-file err: the %s reference does not exits in %s at %s", inp, searchDir, rp)
+			return
 		}
-		
+		refFile, err := os.OpenFile(rp, os.O_RDONLY, 0755)
+		if err != nil {
+			respErrF("cat-file err: failed to open %s file: %s", rp, err.Error())
+			return
+		}
+		reader, err := zlib.NewReader(refFile)
+		if err != nil {
+			respErrF("cat-file err: failed to create reader for %s file in zlib: %s", rp, err.Error())
+			return
+		}
+		defer reader.Close()
 	} else {
-		respErr("specify which file to read use 'help cat-file' for more info")
+		respErr("cat-file err: specify which file to read use 'help cat-file' for more info")
+		return
 	}
 }
 
@@ -72,7 +98,6 @@ func initialize() {
 	initDir := ".git"
 	run_env := os.Getenv("run_env")
 	if run_env == "test" {
-
 		initDir = "tmp/.git"
 	}
 	_, err := os.Stat(initDir)
@@ -83,7 +108,7 @@ func initialize() {
 		if err := os.MkdirAll(fmt.Sprintf("%s/objects", initDir), 0755); err != nil {
 			respErrF("failed to create %s/objects dir: %s", initDir, err.Error())
 		}
-		if err := os.MkdirAll(fmt.Sprintf("%s/ref", initDir), 0755); err != nil {
+		if err := os.MkdirAll(fmt.Sprintf("%s/refs", initDir), 0755); err != nil {
 			respErrF("failed to create %s/refs dir: %s", initDir, err.Error())
 		}
 		if err := os.MkdirAll(fmt.Sprintf("%s/logs", initDir), 0755); err != nil {
@@ -125,6 +150,7 @@ func respErrF(format string, args ...any) {
 	fmt.Fprintf(m, format, args...) // apply formatting
 	m.WriteString("\n")
 	os.Stderr.WriteString(m.String())
+	return
 }
 func respErr(msgs ...string) {
 	m := new(strings.Builder)
@@ -142,6 +168,7 @@ func respErr(msgs ...string) {
 
 	m.WriteString("\n")
 	os.Stderr.WriteString(m.String())
+	return
 }
 
 func respF(format string, args ...any) {
@@ -161,4 +188,5 @@ func resp(msgs ...string) {
 	}
 	m.WriteString("\n")
 	os.Stdout.WriteString(m.String())
+	return
 }
