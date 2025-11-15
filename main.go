@@ -4,11 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"compress/zlib"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -25,11 +29,158 @@ func main() {
 		initialize()
 	case "cat-file":
 		catFile(args)
-
+	case "log":
+		log()
 	default:
 		respErrF("invalid command '%s' use help for list of commands", command)
 	}
 
+}
+func log() {
+	run_env := os.Getenv("run_env")
+
+	searchDir := ".git/objects"
+	if run_env == "test" {
+		searchDir = "tmp/.git/objects"
+	}
+
+	notSearch := []string{
+		"info",
+		"pack",
+	}
+
+	stat, err := os.Stat(searchDir)
+	if err != nil {
+		respErrF("log err: the %s dir does not exist", searchDir)
+		return
+	}
+	if !stat.IsDir() {
+		respErrF("log err: the %s is not a dir", searchDir)
+		return
+	}
+
+	entries, err := os.ReadDir(searchDir)
+	if err != nil {
+		respErrF("log err: failed to read %s entries", searchDir)
+		return
+	}
+
+	refFiles := make([]string, 0)
+
+	for _, entry := range entries {
+		if slices.Contains(notSearch, entry.Name()) {
+			continue
+		}
+
+		if !entry.IsDir() || len(entry.Name()) != 2 {
+			continue
+		}
+
+		subDir := filepath.Join(searchDir, entry.Name())
+		subEntries, err := os.ReadDir(subDir)
+		if err != nil {
+			respErrF("log err: failed to read %s entries: %s", entry.Name(), err.Error())
+			return
+		}
+
+		for _, subEntry := range subEntries {
+			if subEntry.IsDir() {
+				continue
+			}
+
+			sha := entry.Name() + subEntry.Name()
+			if len(sha) != 40 {
+				continue
+			}
+
+			refFiles = append(refFiles, sha)
+		}
+	}
+
+	for _, ref := range refFiles {
+		path := filepath.Join(searchDir, ref[:2], ref[2:])
+
+		objType, authorName, authorEmail, timestamp, msg, err :=
+			readCommitRef(path)
+
+		if err != nil {
+			continue
+		}
+
+		respF("%s %s\nAuthor: %s %s\nDate: %s\n\n%s\n\n",
+			objType, ref, authorName, authorEmail, timestamp, msg)
+	}
+}
+
+func readCommitRef(refPath string) (string, string, string, string, string, error) {
+	file, err := os.OpenFile(refPath, os.O_RDONLY, 0755)
+	if err != nil {
+		return "", "", "", "", "", fmt.Errorf("failed to open file: %s", err.Error())
+	}
+	defer file.Close()
+
+	reader, err := zlib.NewReader(file)
+	if err != nil {
+		return "", "", "", "", "", fmt.Errorf("failed to read refPath: %s", err.Error())
+	}
+	defer reader.Close()
+
+	buf := bufio.NewReader(reader)
+
+	header, err := buf.ReadBytes(0x00)
+	if err != nil {
+		return "", "", "", "", "", fmt.Errorf("failed to read null byte: %s", err.Error())
+	}
+
+	header = header[:len(header)-1]
+
+	parts := bytes.SplitN(header, []byte(" "), 2)
+	objType := string(parts[0])
+
+	if objType != "commit" {
+		return "", "", "", "", "", errors.New("none commit ref")
+	}
+
+	objSize, _ := strconv.Atoi(string(parts[1]))
+
+	payload := make([]byte, objSize)
+	_, err = io.ReadFull(buf, payload)
+	if err != nil {
+		return "", "", "", "", "", fmt.Errorf("failed to read buf into payload: %s", err.Error())
+	}
+
+	payloadStr := string(payload)
+
+	lines := strings.Split(payloadStr, "\n")
+
+	var authorName, authorEmail, timestamp string
+	var msg string
+
+	for i := range lines {
+		line := lines[i]
+
+		if strings.HasPrefix(line, "author ") {
+			fields := strings.Fields(line)
+			authorName = fields[1]
+			authorEmail = strings.Trim(fields[2], "<>")
+			timestamp = fields[3]
+			continue
+		}
+
+		if line == "" && i < len(lines)-1 {
+			msg = strings.Join(lines[i+1:], "\n")
+			break
+		}
+	}
+
+	tsInt, err := strconv.Atoi(timestamp)
+	if err != nil {
+		return "", "", "", "", "", fmt.Errorf("failed to parse timestamp of %s: %s", timestamp, err.Error())
+	}
+
+	t := time.Unix(int64(tsInt), 0).Local().String()
+
+	return objType, authorName, authorEmail, t, msg, nil
 }
 
 func catFile(args []string) {
