@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"compress/zlib"
 	"fmt"
+	"io"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -88,6 +92,23 @@ func catFile(args []string) {
 			return
 		}
 		defer reader.Close()
+		buf := bufio.NewReader(reader)
+		header, err := buf.ReadBytes(0x00) // read until null byte
+		if err != nil {
+			panic(err)
+		}
+		header = header[:len(header)-1] // remove last part which is null byte
+		parts := bytes.SplitN(header, []byte(" "), 2)
+		objType := string(parts[0])
+		objSize, _ := strconv.Atoi(string(parts[1]))
+		payload := make([]byte, objSize)
+		_, err = io.ReadFull(buf, payload)
+		if err != nil {
+			respErrF("cat-file err: failed to read payload of %s object type: %s", err.Error(), objType)
+			return
+		}
+		resp(fmt.Sprintf("%s payload is:\n", rp), string(payload))
+		return
 	} else {
 		respErr("cat-file err: specify which file to read use 'help cat-file' for more info")
 		return
@@ -150,7 +171,6 @@ func respErrF(format string, args ...any) {
 	fmt.Fprintf(m, format, args...) // apply formatting
 	m.WriteString("\n")
 	os.Stderr.WriteString(m.String())
-	return
 }
 func respErr(msgs ...string) {
 	m := new(strings.Builder)
@@ -168,7 +188,6 @@ func respErr(msgs ...string) {
 
 	m.WriteString("\n")
 	os.Stderr.WriteString(m.String())
-	return
 }
 
 func respF(format string, args ...any) {
@@ -181,12 +200,11 @@ func resp(msgs ...string) {
 	m := new(strings.Builder)
 	for i, msg := range msgs {
 		if i == 0 {
-			fmt.Fprintf(m, "%s%s%s ", White, msg, Reset)
+			fmt.Fprintf(m, "%s%s%s", White, msg, Reset)
 		} else {
-			fmt.Fprintf(m, "%s%s%s ", Blue, msg, Reset)
+			fmt.Fprintf(m, "%s%s%s", Blue, msg, Reset)
 		}
 	}
 	m.WriteString("\n")
 	os.Stdout.WriteString(m.String())
-	return
 }

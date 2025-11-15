@@ -153,6 +153,7 @@ func TestCatFile(t *testing.T) {
 		if strings.HasPrefix(err, "cat-file err:") {
 			t.Fatal("stderr is not empty")
 		}
+		// TODO: validate the blob written to the object file
 		t.Cleanup(func() {
 			if err := os.RemoveAll("tmp/"); err != nil {
 				t.Fatalf("failed to cleanup tmp dir: %s", err.Error())
