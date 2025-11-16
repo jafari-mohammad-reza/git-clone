@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -85,7 +87,6 @@ func main() {
 		}
 		println(resp)
 	case "ls-tree":
-		// print tree of all branches
 		if len(args) < 3 {
 			fmt.Println("give the hash you want to read")
 			return
@@ -97,12 +98,155 @@ func main() {
 			return
 		}
 		println(resp)
+	case "write-tree":
+		// get a snapshot of current directory(staging state) and loop over all files and create the hash object of them , for directories create tree for them and create hash object for their inner files
 
+		pwd, err := os.Getwd()
+		if err != nil {
+			panic(err)
+		}
+		resp, err := writeTree(pwd)
+		if err != nil {
+			println(err.Error())
+			return
+		}
+		println(resp)
 	default:
 		fmt.Printf("invalid command '%s' use help for list of commands\n", command)
 	}
 
 }
+
+func writeTree(dirPath string) (string, error) {
+	type entry struct {
+		name string
+		data []byte
+	}
+
+	hexToRaw := func(h string) ([]byte, error) {
+		b, err := hex.DecodeString(h)
+		if err != nil {
+			return nil, err
+		}
+		if len(b) != 20 {
+			return nil, fmt.Errorf("sha length != 20 for %s", h)
+		}
+		return b, nil
+	}
+
+	writeObject := func(kind string, data []byte) (string, error) {
+		header := fmt.Sprintf("%s %d\x00", kind, len(data))
+		store := append([]byte(header), data...)
+		sha := sha1.Sum(store)
+		shaHex := hex.EncodeToString(sha[:])
+
+		objDir := filepath.Join(".git", "objects", shaHex[:2])
+		objPath := filepath.Join(objDir, shaHex[2:])
+
+		if _, err := os.Stat(objPath); err == nil {
+			return shaHex, nil
+		}
+
+		if err := os.MkdirAll(objDir, 0o755); err != nil {
+			return "", fmt.Errorf("mkdir: %w", err)
+		}
+
+		f, err := os.Create(objPath)
+		if err != nil {
+			return "", fmt.Errorf("create: %w", err)
+		}
+		defer f.Close()
+
+		zw := zlib.NewWriter(f)
+		if _, err := zw.Write(store); err != nil {
+			return "", fmt.Errorf("zlib write: %w", err)
+		}
+		if err := zw.Close(); err != nil {
+			return "", fmt.Errorf("zlib close: %w", err)
+		}
+
+		return shaHex, nil
+	}
+
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return "", fmt.Errorf("read dir %s: %w", dirPath, err)
+	}
+
+	ignorePath := filepath.Join(dirPath, ".gitignore")
+	ignores := map[string]bool{}
+	if data, err := os.ReadFile(ignorePath); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				ignores[line] = true
+			}
+		}
+	}
+
+	var treeEntries []entry
+
+	for _, e := range entries {
+		name := e.Name()
+		if name == ".git" {
+			continue
+		}
+		if ignores[name] {
+			continue
+		}
+
+		full := filepath.Join(dirPath, name)
+
+		if e.IsDir() {
+			childHash, err := writeTree(full)
+			if err != nil {
+				return "", fmt.Errorf("subtree %s: %w", full, err)
+			}
+			raw, err := hexToRaw(childHash)
+			if err != nil {
+				return "", err
+			}
+			prefix := []byte(fmt.Sprintf("40000 %s\x00", name))
+			treeEntries = append(treeEntries, entry{name, append(prefix, raw...)})
+			continue
+		}
+
+		data, err := os.ReadFile(full)
+		if err != nil {
+			return "", fmt.Errorf("read file %s: %w", full, err)
+		}
+
+		blobHash, err := writeObject("blob", data)
+		if err != nil {
+			return "", fmt.Errorf("write blob %s: %w", full, err)
+		}
+
+		raw, err := hexToRaw(blobHash)
+		if err != nil {
+			return "", err
+		}
+
+		prefix := []byte(fmt.Sprintf("100644 %s\x00", name))
+		treeEntries = append(treeEntries, entry{name, append(prefix, raw...)})
+	}
+
+	sort.Slice(treeEntries, func(i, j int) bool {
+		return treeEntries[i].name < treeEntries[j].name
+	})
+
+	var content []byte
+	for _, te := range treeEntries {
+		content = append(content, te.data...)
+	}
+
+	treeHash, err := writeObject("tree", content)
+	if err != nil {
+		return "", fmt.Errorf("write tree: %w", err)
+	}
+
+	return treeHash, nil
+}
+
 func lsTree(hash, runEnv string) (string, error) {
 	objDir := ".git/objects"
 	if runEnv == "test" {
@@ -529,6 +673,12 @@ func help(subCmd string) (string, error) {
 			return "cat-file <hash>: reads the changes of a hash and prints the changes content", nil
 		case "log":
 			return "log: prints commits and tree hashes. and shows its author, date of commit and the commit message", nil
+		case "ls-objects":
+			return "ls-objects: use for list the objects stored ar .git/objects with their type", nil
+		case "ls-tree":
+			return "ls-tree: give a hash and see list of files in that tree", nil
+		case "write-tree":
+			return "write-tree => creates a tree object from the current state of the staging area", nil
 		default:
 			return "", fmt.Errorf("invalid sub command '%s' use 'help' for list of possible commands", subCmd)
 		}
@@ -539,6 +689,8 @@ func help(subCmd string) (string, error) {
 			hash-object => read a ref compressed hash file into actual content.
 			log => shows list commits.
 			ls-objects => *NOT AN OFFICIAL COMMAND* use for list the objects stored ar .git/objects with their type
+			ls-tree => give a hash and see list of files in that tree
+			write-tree => creates a tree object from the current state of the staging area(current dir)
 		`, nil
 	}
 }
