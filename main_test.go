@@ -189,3 +189,59 @@ func TestListObjects(t *testing.T) {
 		t.Fatalf("unexpected output: %s", out)
 	}
 }
+
+func TestLsTree(t *testing.T) {
+	os.RemoveAll("tmp")
+	defer os.RemoveAll("tmp")
+
+	dir := "tmp/.git/objects/ab"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+
+	mode1 := "40000"
+	name1 := "src"
+	sha1_1 := bytes.Repeat([]byte{0x11}, 20) 
+
+	mode2 := "100644"
+	name2 := "main.go"
+	sha1_2 := bytes.Repeat([]byte{0x22}, 20)
+
+	payload := []byte{}
+	payload = append(payload, []byte(fmt.Sprintf("%s %s", mode1, name1))...)
+	payload = append(payload, 0x00)
+	payload = append(payload, sha1_1...)
+
+	payload = append(payload, []byte(fmt.Sprintf("%s %s", mode2, name2))...)
+	payload = append(payload, 0x00)
+	payload = append(payload, sha1_2...)
+
+	header := []byte(fmt.Sprintf("tree %d\x00", len(payload)))
+
+	final := append(header, payload...)
+
+	var buf bytes.Buffer
+	zw := zlib.NewWriter(&buf)
+	if _, err := zw.Write(final); err != nil {
+		t.Fatalf("zlib write failed: %v", err)
+	}
+	zw.Close()
+
+	gitObjectHash := "ab" + "cdef01" 
+	filePath := "tmp/.git/objects/ab/cdef01"
+
+	if err := os.WriteFile(filePath, buf.Bytes(), 0644); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	out, err := lsTree(gitObjectHash, "test")
+	if err != nil {
+		t.Fatalf("lsTree failed: %v", err)
+	}
+
+	expected := "src/\nmain.go\n"
+
+	if out != expected {
+		t.Fatalf("unexpected output:\n%s\nexpected:\n%s", out, expected)
+	}
+}

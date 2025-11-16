@@ -44,7 +44,7 @@ func main() {
 		}
 	case "cat-file":
 		if len(args) < 3 {
-			fmt.Println("give the file you want to hash")
+			fmt.Println("give the hash you want to read")
 			return
 		}
 		hash := args[2]
@@ -86,10 +86,85 @@ func main() {
 		println(resp)
 	case "ls-tree":
 		// print tree of all branches
+		if len(args) < 3 {
+			fmt.Println("give the hash you want to read")
+			return
+		}
+		hash := args[2]
+		resp, err := lsTree(hash, runEnv)
+		if err != nil {
+			println(err.Error())
+			return
+		}
+		println(resp)
+
 	default:
 		fmt.Printf("invalid command '%s' use help for list of commands\n", command)
 	}
 
+}
+func lsTree(hash, runEnv string) (string, error) {
+	objDir := ".git/objects"
+	if runEnv == "test" {
+		objDir = "tmp/.git/objects"
+	}
+	filePath := path.Join(objDir, hash[:2], hash[2:])
+	file, err := os.OpenFile(filePath, os.O_RDONLY, 0755)
+	if err != nil {
+		return "", fmt.Errorf("failed to open %s: %s", filePath, err.Error())
+	}
+	defer file.Close()
+
+	reader, err := zlib.NewReader(file)
+	if err != nil {
+		return "", fmt.Errorf("failed to read refPath: %s", err.Error())
+	}
+	defer reader.Close()
+
+	buf := bufio.NewReader(reader)
+
+	header, err := buf.ReadBytes(0x00)
+	if err != nil {
+		return "", fmt.Errorf("failed to read null byte: %s", err.Error())
+	}
+
+	header = header[:len(header)-1]
+	parts := bytes.SplitN(header, []byte(" "), 2)
+	objSize, _ := strconv.Atoi(string(parts[1]))
+	payload := make([]byte, objSize)
+	_, err = io.ReadFull(buf, payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to read buf into payload: %s", err.Error())
+	}
+	i := 0
+	resp := ""
+	for i < len(payload) {
+		j := bytes.IndexByte(payload[i:], ' ')
+		if j < 0 {
+			return "", fmt.Errorf("invalid tree: missing space for mode")
+		}
+		mode := string(payload[i : i+j])
+		i += j + 1
+
+		k := bytes.IndexByte(payload[i:], 0x00)
+		if k < 0 {
+			return "", fmt.Errorf("invalid tree: missing null after filename")
+		}
+		filename := string(payload[i : i+k])
+		i += k + 1
+
+		if i+20 > len(payload) {
+			return "", fmt.Errorf("invalid tree: truncated sha1")
+		}
+		i += 20
+
+		if mode == "40000" {
+			filename = filename + "/"
+		}
+		resp = resp + strings.Trim(filename, " ") + "\n"
+	}
+
+	return resp, nil
 }
 
 func listObjects(run_env string) (string, error) {
