@@ -42,7 +42,12 @@ func main() {
 			return
 		}
 	case "cat-file":
-		resp, err := catFile(args)
+		if len(args) < 3 {
+			fmt.Println("give the file you want to hash")
+			return
+		}
+		hash := args[2]
+		resp, err := catFile(hash)
 		if err != nil {
 			println(err.Error())
 			return
@@ -265,7 +270,7 @@ func readCommitRef(refPath string) (string, string, string, string, string, erro
 	return objType, authorName, authorEmail, t, msg, nil
 }
 
-func catFile(args []string) (string, error) {
+func catFile(inp string) (string, error) {
 	run_env := os.Getenv("run_env")
 
 	searchDir := ".git/objects"
@@ -273,74 +278,66 @@ func catFile(args []string) (string, error) {
 		searchDir = "tmp/.git/objects"
 	}
 
-	if len(args) > 2 {
-		inp := args[2]
-		if inp == "" {
-			return "", fmt.Errorf("cat-file err: invalid input file use cat-file --list for list of possible hashes to read.")
-		}
-		objDir := fmt.Sprintf("%s/%s", searchDir, inp[:2])
+	objDir := fmt.Sprintf("%s/%s", searchDir, inp[:2])
 
-		stat, err := os.Stat(objDir)
-		if err != nil {
-			return "", fmt.Errorf("cat-file err: the %s reference dir does not exits in %s at %s", inp, searchDir, objDir)
-		}
-		if !stat.IsDir() {
-			return "", fmt.Errorf("cat-file err: the reference is not a dir")
-		}
-		entries, err := os.ReadDir(objDir)
-		if err != nil {
-			return "", fmt.Errorf("cat-file err: failed to read %s entries: %s", objDir, err.Error())
-		}
-		found := ""
-		for _, entry := range entries {
-			entry.Name()
-			if strings.HasPrefix(entry.Name(), inp[2:]) {
-				found = entry.Name()
-				break
-			}
-		}
-		if found == "" {
-			return "", fmt.Errorf("cat-file err: failed to find any reference with prefix of : %s", inp[2:])
-
-		}
-		rp := fmt.Sprintf("%s/%s/%s", searchDir, inp[:2], found)
-
-		_, err = os.Stat(rp)
-		if err != nil {
-			return "", fmt.Errorf("cat-file err: the %s reference does not exits in %s at %s", inp, searchDir, rp)
-
-		}
-		refFile, err := os.OpenFile(rp, os.O_RDONLY, 0755)
-		if err != nil {
-			return "", fmt.Errorf("cat-file err: failed to open %s file: %s", rp, err.Error())
-
-		}
-		reader, err := zlib.NewReader(refFile)
-		if err != nil {
-			return "", fmt.Errorf("cat-file err: failed to create reader for %s file in zlib: %s", rp, err.Error())
-
-		}
-		defer reader.Close()
-		buf := bufio.NewReader(reader)
-		header, err := buf.ReadBytes(0x00) // read until null byte
-		if err != nil {
-			panic(err)
-		}
-		header = header[:len(header)-1] // remove last part which is null byte
-		parts := bytes.SplitN(header, []byte(" "), 2)
-		objType := string(parts[0])
-		objSize, _ := strconv.Atoi(string(parts[1]))
-		payload := make([]byte, objSize)
-		_, err = io.ReadFull(buf, payload)
-		if err != nil {
-			return "", fmt.Errorf("cat-file err: failed to read payload of %s object type: %s", err.Error(), objType)
-
-		}
-		return fmt.Sprintf("%s payload is:\n%s%s%s", rp, Blue, string(payload), Reset), nil // TODO: make the outcome look better
-
-	} else {
-		return "", fmt.Errorf("cat-file err: specify which file to read use 'help cat-file' for more info")
+	stat, err := os.Stat(objDir)
+	if err != nil {
+		return "", fmt.Errorf("cat-file err: the %s reference dir does not exits in %s at %s", inp, searchDir, objDir)
 	}
+	if !stat.IsDir() {
+		return "", fmt.Errorf("cat-file err: the reference is not a dir")
+	}
+	entries, err := os.ReadDir(objDir)
+	if err != nil {
+		return "", fmt.Errorf("cat-file err: failed to read %s entries: %s", objDir, err.Error())
+	}
+	found := ""
+	for _, entry := range entries {
+		entry.Name()
+		if strings.HasPrefix(entry.Name(), inp[2:]) {
+			found = entry.Name()
+			break
+		}
+	}
+	if found == "" {
+		return "", fmt.Errorf("cat-file err: failed to find any reference with prefix of : %s", inp[2:])
+
+	}
+	rp := fmt.Sprintf("%s/%s/%s", searchDir, inp[:2], found)
+
+	_, err = os.Stat(rp)
+	if err != nil {
+		return "", fmt.Errorf("cat-file err: the %s reference does not exits in %s at %s", inp, searchDir, rp)
+
+	}
+	refFile, err := os.OpenFile(rp, os.O_RDONLY, 0755)
+	if err != nil {
+		return "", fmt.Errorf("cat-file err: failed to open %s file: %s", rp, err.Error())
+
+	}
+	reader, err := zlib.NewReader(refFile)
+	if err != nil {
+		return "", fmt.Errorf("cat-file err: failed to create reader for %s file in zlib: %s", rp, err.Error())
+
+	}
+	defer reader.Close()
+	buf := bufio.NewReader(reader)
+	header, err := buf.ReadBytes(0x00) // read until null byte
+	if err != nil {
+		panic(err)
+	}
+	header = header[:len(header)-1] // remove last part which is null byte
+	parts := bytes.SplitN(header, []byte(" "), 2)
+	objType := string(parts[0])
+	objSize, _ := strconv.Atoi(string(parts[1]))
+	payload := make([]byte, objSize)
+	_, err = io.ReadFull(buf, payload)
+	if err != nil {
+		return "", fmt.Errorf("cat-file err: failed to read payload of %s object type: %s", err.Error(), objType)
+
+	}
+	return fmt.Sprintf("%s payload is:\n%s%s%s", rp, Blue, string(payload), Reset), nil // TODO: make the outcome look better
+
 }
 
 func initialize(runEnv string) error {

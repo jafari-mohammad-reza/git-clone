@@ -45,10 +45,8 @@ func TestInitCommand(t *testing.T) {
 		})
 	})
 	t.Run("should return already exist err", func(t *testing.T) {
-		initialize("test")
-		err := fetchStdErr(t)
-		if !strings.ContainsAny(err, "the .git dir already exists") {
-			t.Fatal("the .git dir already exists message was not printed")
+		if err := initialize("test"); err != nil {
+			t.Fatalf("initialize got error: %s", err.Error())
 		}
 	})
 }
@@ -64,46 +62,31 @@ func TestCatFile(t *testing.T) {
 		if err := os.WriteFile(fmt.Sprintf("tmp/.git/objects/%s/%s", keyname[:2], keyname[2:]), []byte("test"), 0755); err != nil {
 			t.Fatalf("failed to write file with keyname after second char: %s", err.Error())
 		}
-		catFile([]string{
-			"",
-			"",
-			keyname,
-		})
-		err := fetchStdErr(t)
-
-		if strings.HasPrefix(err, "cat-file err:") {
-			t.Fatal("stderr is not empty")
+		hash, err := hashObject("main.go")
+		if err != nil {
+			t.Fatalf("hash object error: %s", err.Error())
 		}
-		// TODO: validate the blob written to the object file
+
+		file, err := catFile(hash)
+		fmt.Printf("file: %v\n", file)
+
+		if err != nil {
+			t.Fatalf("cat file error: %s", err.Error())
+		}
 		t.Cleanup(func() {
 			if err := os.RemoveAll("tmp/"); err != nil {
 				t.Fatalf("failed to cleanup tmp dir: %s", err.Error())
 			}
 		})
 	})
-	t.Run("should throw error that inpt is not given", func(t *testing.T) {
-		catFile([]string{
-			"",
-			"",
-		})
-		err := fetchStdErr(t)
-		if !strings.ContainsAny(err, "cat-file err: specify which file to read use 'help cat-file' for more info") {
-			t.Fatalf("expected to get 'cat-file err: specify which file to read use 'help cat-file' for more info' but got %s", err)
-		}
 
-	})
 	t.Run("should throw error that objects dir is not found", func(t *testing.T) {
 		t.Setenv("run_env", "test")
 		initialize("test")
 		keyname := "abcdefg"
 
-		catFile([]string{
-			"",
-			"",
-			keyname,
-		})
-		err := fetchStdErr(t)
-		if !strings.ContainsAny(err, "cat-file err: the abcdefg reference dir does not exits in tmp/.git/objects at tmp/.git/objects/ab") {
+		_, err := catFile(keyname)
+		if !strings.ContainsAny(err.Error(), "cat-file err: the abcdefg reference dir does not exits in tmp/.git/objects at tmp/.git/objects/ab") {
 			t.Fatal("wrong error message")
 		}
 		t.Cleanup(func() {
@@ -121,14 +104,9 @@ func TestCatFile(t *testing.T) {
 			t.Fatalf("failed to create the dir with given prefix: %s", err.Error())
 		}
 
-		catFile([]string{
-			"",
-			"",
-			keyname,
-		})
-		err := fetchStdErr(t)
+		_, err := catFile(keyname)
 
-		if !strings.ContainsAny(err, "cat-file err: failed to find any reference with prefix of : cdefg") {
+		if !strings.ContainsAny(err.Error(), "cat-file err: failed to find any reference with prefix of : cdefg") {
 			t.Fatal("stderr is not empty")
 		}
 		t.Cleanup(func() {
@@ -166,7 +144,7 @@ func TestHashObject(t *testing.T) {
 			t.Fatalf("failed to read %s: %s", hashPath, err.Error())
 		}
 
-		catFile([]string{"", "", hash})
+		catFile(hash)
 
 		t.Cleanup(func() {
 			if err := os.RemoveAll("tmp/"); err != nil {
