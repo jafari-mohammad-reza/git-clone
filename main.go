@@ -99,7 +99,6 @@ func main() {
 		}
 		println(resp)
 	case "write-tree":
-		// get a snapshot of current directory(staging state) and loop over all files and create the hash object of them , for directories create tree for them and create hash object for their inner files
 
 		pwd, err := os.Getwd()
 		if err != nil {
@@ -111,12 +110,72 @@ func main() {
 			return
 		}
 		println(resp)
+	case "commit-tree":
+		pwd, err := os.Getwd()
+		if err != nil {
+			panic(err)
+		}
+		hash, err := writeTree(pwd)
+		if err != nil {
+			println(err.Error())
+			return
+		}
+
+		if len(args) < 3 {
+			fmt.Println("give the file you want to hash")
+			return
+		}
+		msg := args[2]
+		commitHash, err := commitTree(hash, msg)
+		if err != nil {
+			println(err.Error())
+			return
+		}
+		println(commitHash)
 	default:
 		fmt.Printf("invalid command '%s' use help for list of commands\n", command)
 	}
 
 }
+func commitTree(treeHash, msg string) (string, error) {
+	raw := fmt.Sprintf("tree %s\n"+
+		"parent %s\n"+
+		"author teyyubismayil <tismayilov@pro.simbrella.com> 1661410769 +0400\n"+
+		"teyyubismayil <tismayilov@pro.simbrella.com> 1661410769 +0400\n\n"+
+		"%s\n", treeHash, "master", msg) // master for now
 
+	header := fmt.Sprintf("blob %d\x00", len(raw))
+	full := append([]byte(header), raw...)
+	hasher := sha1.New()
+	if _, err := hasher.Write(full); err != nil {
+		return "", fmt.Errorf("failed to hash header: %s",  err.Error())
+
+	}
+	hash := fmt.Sprintf("%x", hasher.Sum(nil))
+
+	targetDir := fmt.Sprintf(".git/objects/%s", hash[:2])
+	run_env := os.Getenv("run_env")
+	if run_env == "test" {
+		targetDir = fmt.Sprintf("tmp/.git/objects/%s", hash[:2])
+	}
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create %s dir: %s", targetDir, err.Error())
+
+	}
+	out, err := os.OpenFile(fmt.Sprintf("%s/%s", targetDir, hash[2:]), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0755)
+	if err != nil {
+		return "", fmt.Errorf("failed to create %s file: %s", fmt.Sprintf("%s/%s", targetDir, hash[2:]), err.Error())
+
+	}
+	defer out.Close()
+	writer := zlib.NewWriter(out)
+	if _, err := writer.Write(full); err != nil {
+		return "", fmt.Errorf("failed to write compressed data: %s", err.Error())
+
+	}
+	defer writer.Close()
+	return hash , nil
+}
 func writeTree(dirPath string) (string, error) {
 	type entry struct {
 		name string
