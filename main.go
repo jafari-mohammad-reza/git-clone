@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -68,16 +69,85 @@ func main() {
 	case "log":
 		logs, err := log()
 		if err != nil {
-			println(err)
+			println(err.Error())
 			return
 		}
 		for _, log := range logs {
 			println(log)
 		}
+	case "ls-objects":
+		// this is not an actual git command just for practice
+		// iot will read all hash directories in .git/objects and print each one with it object type
+		resp, err := listObjects(runEnv)
+		if err != nil {
+			println(err.Error())
+			return
+		}
+		println(resp)
+	case "ls-tree":
+		// print tree of all branches
 	default:
 		fmt.Printf("invalid command '%s' use help for list of commands\n", command)
 	}
 
+}
+
+func listObjects(run_env string) (string, error) {
+	targetDir := ".git/objects"
+	if run_env == "test" {
+		targetDir = "tmp/.git/objects"
+	}
+	entries, err := os.ReadDir(targetDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to read %s dir entries: %s", targetDir, err.Error())
+	}
+
+	notSearch := []string{
+		"info",
+		"pack",
+	}
+	resp := ""
+	for _, entry := range entries {
+		if slices.Contains(notSearch, entry.Name()) {
+			continue
+		}
+		if entry.IsDir() {
+			subEntries, err := os.ReadDir(path.Join(targetDir, entry.Name()))
+			if err != nil {
+				return "", fmt.Errorf("failed to read sub entry content for %s dir: %s", entry.Name(), err.Error())
+			}
+			for _, subEntry := range subEntries {
+
+				refPath := fmt.Sprintf("%s/%s/%s", targetDir, entry.Name(), subEntry.Name())
+				file, err := os.OpenFile(refPath, os.O_RDONLY, 0755)
+				if err != nil {
+					return "", fmt.Errorf("failed to open file: %s", err.Error())
+				}
+				defer file.Close()
+
+				reader, err := zlib.NewReader(file)
+				if err != nil {
+					return "", fmt.Errorf("failed to read refPath: %s", err.Error())
+				}
+				defer reader.Close()
+
+				buf := bufio.NewReader(reader)
+
+				header, err := buf.ReadBytes(0x00)
+				if err != nil {
+					return "", fmt.Errorf("failed to read null byte: %s", err.Error())
+				}
+
+				header = header[:len(header)-1]
+
+				parts := bytes.SplitN(header, []byte(" "), 2)
+				objType := string(parts[0])
+				resp = resp + "\n" + fmt.Sprintf("%s - %s", objType, entry.Name()+subEntry.Name())
+			}
+		}
+
+	}
+	return resp, nil
 }
 
 func hashObject(file string) (string, error) {
@@ -393,6 +463,7 @@ func help(subCmd string) (string, error) {
 			cat-file => read a ref compressed hash file into actual content.
 			hash-object => read a ref compressed hash file into actual content.
 			log => shows list commits.
+			ls-objects => *NOT AN OFFICIAL COMMAND* use for list the objects stored ar .git/objects with their type
 		`, nil
 	}
 }

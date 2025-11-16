@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/zlib"
 	"fmt"
 	"os"
 	"strings"
@@ -152,4 +154,38 @@ func TestHashObject(t *testing.T) {
 			}
 		})
 	})
+}
+func TestListObjects(t *testing.T) {
+	os.RemoveAll("tmp")
+	defer os.RemoveAll("tmp")
+
+	objDir := "tmp/.git/objects/ab"
+	if err := os.MkdirAll(objDir, 0755); err != nil {
+		t.Fatalf("failed to create dirs: %v", err)
+	}
+
+	content := []byte("hello world\n")
+	header := fmt.Sprintf("blob %d\x00", len(content))
+	gitObj := append([]byte(header), content...)
+
+	var buf bytes.Buffer
+	zw := zlib.NewWriter(&buf)
+	if _, err := zw.Write(gitObj); err != nil {
+		t.Fatalf("failed to write zlib: %v", err)
+	}
+	zw.Close()
+
+	err := os.WriteFile("tmp/.git/objects/ab/cdef01", buf.Bytes(), 0644)
+	if err != nil {
+		t.Fatalf("failed to write git object: %v", err)
+	}
+
+	out, err := listObjects("test")
+	if err != nil {
+		t.Fatalf("listObjects err: %v", err)
+	}
+
+	if !strings.Contains(out, "blob - abcdef01") {
+		t.Fatalf("unexpected output: %s", out)
+	}
 }
